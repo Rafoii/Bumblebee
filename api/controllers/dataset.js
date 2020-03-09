@@ -1,20 +1,17 @@
 
 const Session = require('../models/session')
 
-const Dataset = require('../models/dataset')
-const Row = require('../models/row')
-
 exports.index = function (req, res) {
   Session.get(function (err, sessions) {
     if (err) {
       res.json({
-        status: "error",
-        message: err,
+        status: 'error',
+        message: err
       })
     }
     res.json({
-      status: "success",
-      message: "Sessions retrieved successfully",
+      status: 'success',
+      message: 'Sessions retrieved successfully',
       data: sessions
     })
   })
@@ -27,8 +24,8 @@ exports.new = function (req, res) {
   session.datasets = []
 
   session.save(function (err) {
-    // if (err)
-    //     res.json(err)
+    if (err) throw err
+
     res.json({
       message: 'New session created!',
       data: session
@@ -40,8 +37,7 @@ exports.view = function (req, res) {
   Session.findById(req.params.session_id, function (err, session) {
     if (err) {
       res.send(err)
-    }
-    else {
+    } else {
       res.json({
         message: 'Session details loading..',
         data: session
@@ -52,13 +48,11 @@ exports.view = function (req, res) {
 
 exports.update = function (req, res) {
   Session.findById(req.params.session_id, function (err, session) {
-    if (err)
-      res.send(err)
+    if (err) { res.send(err) }
     session.name = req.body.name ? req.body.name : session.name
 
     session.save(function (err) {
-      if (err)
-        res.json(err)
+      if (err) { res.json(err) }
       res.json({
         message: 'Session Info updated',
         data: session
@@ -73,10 +67,9 @@ exports.delete = async function (req, res) {
   })
   if (payload.err) {
     res.send(payload.err)
-  }
-  else {
+  } else {
     res.json({
-      status: "success",
+      status: 'success',
       message: 'Session deleted'
     })
   }

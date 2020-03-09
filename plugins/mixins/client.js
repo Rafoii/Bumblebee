@@ -1,9 +1,9 @@
 import io from 'socket.io-client'
 
 let socket
-let promises = {}
+const promises = {}
 
-const api_url = process.env.API_URL || 'http://localhost:5000'
+const apiUrl = process.env.API_URL || 'http://localhost:5000'
 
 export default {
 
@@ -13,18 +13,17 @@ export default {
     }
   },
 
-  mounted() {
+  mounted () {
     window.evalCode = async (code) => {
       var result = await this.evalCode(code)
       console.log(result)
     }
   },
 
-	methods: {
+  methods: {
 
     async evalCode (code) {
       try {
-
         var response = await this.socketPost('run', {
           code,
           session: this.$store.state.session
@@ -33,10 +32,9 @@ export default {
         })
 
         return response
-
       } catch (error) {
-        if (error.content && error.content.traceback && error.content.traceback.length){
-          error.content.traceback_escaped = error.content.traceback.map(l=>
+        if (error.content && error.content.traceback && error.content.traceback.length) {
+          error.content.traceback_escaped = error.content.traceback.map(l =>
             l.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '')
           )
           console.error(error.content.traceback_escaped.join('\n'))
@@ -47,34 +45,28 @@ export default {
     },
 
     socketPost (message, payload = {}) {
-
       var timestamp = new Date().toISOString()
 
-      return new Promise( async (resolve, reject) => {
-
+      return new Promise(async (resolve, reject) => {
         try {
           if (!socket) {
-            await this.startSocket ()
-            var response = await this.socketPost('initialize',{
+            await this.startSocket()
+            var response = await this.socketPost('initialize', {
               session: this.$store.state.session,
               engine: this.$store.state.engine
             })
-            if (response.status!='ok')
-              throw response.content
+            if (response.status !== 'ok') { throw response.content }
           }
-          socket.emit(message,{...payload, timestamp})
-          promises[timestamp] = {resolve, reject}
+          socket.emit(message, { ...payload, timestamp })
+          promises[timestamp] = { resolve, reject }
         } catch (error) {
-          reject('Error '+error)
+          reject('Error ' + error)
         }
-
       })
     },
 
     handleDatasetResponse (data, key = undefined) {
-
-      if (key===undefined)
-        key = this.$store.state.key
+      if (key === undefined) { key = this.$store.state.key }
 
       // const fernet = require('fernet')
 
@@ -95,72 +87,55 @@ export default {
       this.$store.commit('add', {
         dataset: data
       })
-
     },
 
-		handleError (reason) {
-			if (reason) {
+    handleError (reason) {
+      if (reason) {
         var reason_string = reason.toString()
-				if (reason_string.includes('OK') ||
+        if (reason_string.includes('OK') ||
           (
           	reason_string.includes('Socket closed') &&
             (this.$store.state.datasets.length > 0)
           )
-				) {
-					this.$store.commit('status')
-				} else {
-					this.$store.commit('status', new Error(reason))
-				}
-			}
-			this.stopClient()
-		},
+        ) {
+          this.$store.commit('status')
+        } else {
+          this.$store.commit('status', new Error(reason))
+        }
+      }
+      this.stopClient()
+    },
 
-		stopClient (waiting) {
-
+    stopClient (waiting) {
       this.socketAvailable = false
 
-      let query = Object.assign({}, this.$route.query);
-      delete query.key;
-      delete query.session;
-      this.$router.replace({ query });
+      const query = Object.assign({}, this.$route.query)
+      delete query.key
+      delete query.session
+      this.$router.replace({ query })
 
-			if (waiting) {
-				this.$store.commit('status', 'waiting')
-			}
-
-			if (socket) {
-				try {
-          socket.disconnect()
-				} catch (error) {
-          console.error(error)
-				}
-        socket = undefined;
-        console.log('Socket closed')
-        return
+      if (waiting) {
+        this.$store.commit('status', 'waiting')
       }
-      else
-        console.warn('Socket already closed')
+
+      if (socket) {
+        try {
+          socket.disconnect()
+        } catch (error) {
+          console.error(error)
+        }
+        socket = undefined
+        console.log('Socket closed')
+      } else { console.warn('Socket already closed') }
     },
 
     startSocket (session, engine, key) {
+      return new Promise((resolve, reject) => {
+        if (session) { this.$store.commit('session', session) } else if (this.$store.state.session) { session = this.$store.state.session } else { throw new Error('Credentials not found') }
 
-      return new Promise((resolve, reject)=>{
+        if (key) { this.$store.commit('key', key) } else if (this.$store.state.key) { key = this.$store.state.key } else { throw new Error('Credentials not found') }
 
-        if (session)
-          this.$store.commit('session', session)
-        else if (this.$store.state.session)
-          session = this.$store.state.session
-        else
-          throw new Error('Credentials not found')
-
-        if (key)
-          this.$store.commit('key', key)
-        else if (this.$store.state.key)
-          key = this.$store.state.key
-        else
-          throw new Error('Credentials not found')
-
-        socket = io(api_url, {
+        socket = io(apiUrl, {
           query: `session=${session}`
         })
 
@@ -171,7 +146,7 @@ export default {
 
         socket.on('dataset', (dataset) => {
           try {
-            this.handleDatasetResponse(dataset,key)
+            this.handleDatasetResponse(dataset, key)
           } catch (error) {
             console.error(error)
             reject(error)
@@ -182,14 +157,12 @@ export default {
           if (payload.timestamp && promises[payload.timestamp]) {
             if (payload.error) {
               promises[payload.timestamp].reject(payload)
-            }
-            else {
+            } else {
               promises[payload.timestamp].resolve(payload)
             }
             delete promises[payload.timestamp]
-          }
-          else {
-            console.warn('Unhandled reply',payload)
+          } else {
+            console.warn('Unhandled reply', payload)
           }
         })
 
@@ -213,15 +186,10 @@ export default {
           this.handleError()
           reject('Connection lost')
         })
-
-
       })
-
-
     },
 
-		async startClient (session, engine, key) {
-
+    async startClient (session, engine, key) {
       try {
         this.$store.commit('status', 'loading')
         this.$store.commit('session', session)
@@ -229,12 +197,10 @@ export default {
         this.$store.commit('key', key)
         var client_status = await this.startSocket(session, engine, key)
 
-        if (client_status=='ok')
-          this.$store.commit('status', 'receiving')
-
+        if (client_status === 'ok') { this.$store.commit('status', 'receiving') }
       } catch (error) {
         this.handleError(error)
       }
     }
-	}
+  }
 }

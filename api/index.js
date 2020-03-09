@@ -1,7 +1,10 @@
+import { trimCharacters, pakoFernet } from './utils/functions.js'
+import { findOneOrCreate } from './utils/controllers'
+
 require('dotenv/config')
 const express = require('express')
 const bodyParser = require('body-parser')
-let mongoose = require('mongoose')
+const mongoose = require('mongoose')
 const session = require('express-session')
 
 const app = express()
@@ -10,66 +13,59 @@ var server = require('http').createServer(app)
 
 const { version } = require('./package.json')
 
-import { trimCharacters, pakoFernet } from './utils/functions.js'
-import { findOneOrCreate } from './utils/controllers'
-
-var app_url
-var app_host
-var api_url
+var appUrl
+var appHost
+// var apiUrl
 var base
-var ws_kernel_base
+var wsKernelBase
 
-var whitelist = []
+var whiteList = []
 
 const sl = `
 `
 
 function updateHost (host = 'localhost') {
+  var kernelHost = process.env.KERNEL_HOST || host
+  var kernelPort = process.env.KERNEL_PORT || 8888
 
-	var kernel_host = process.env.KERNEL_HOST || host
-	var kernel_port = process.env.KERNEL_PORT || 8888
+  base = 'http://' + kernelHost + ':' + kernelPort
+  wsKernelBase = 'ws://' + kernelHost + ':' + kernelPort
 
-	base  = 'http://'+kernel_host+':'+kernel_port
-	ws_kernel_base = 'ws://'+kernel_host+':'+kernel_port
+  appHost = process.env.APP_HOST || host
+  var appPort = process.env.APP_PORT || 3000
 
-	app_host = process.env.APP_HOST || host
-	var app_port = process.env.APP_PORT || 3000
+  appUrl = `${appHost}:${appPort}`
 
-	app_url = `${app_host}:${app_port}`
+  // var apiHost = process.env.HOST || host
+  // var apiPort = process.env.PORT || 5000
 
-	var api_host = process.env.HOST || host
-	var api_port = process.env.PORT || 5000
-
-	api_url = `${api_host}:${api_port}`
-
+  // apiUrl = `${apiHost}:${apiPort}`
 }
 
-updateHost ()
+updateHost()
 
 if (!process.env.DISABLE_CORS) {
+  const cors = require('cors')
 
-	const cors = require('cors')
+  whiteList = [
+    'http://' + appUrl,
+    'https://' + appUrl,
+    'http://' + appHost,
+    'https://' + appHost
+  ]
 
-	whitelist = [
-		'http://'+app_url,
-		'https://'+app_url,
-		'http://'+app_host,
-		'https://'+app_host
-	]
+  var corsOptions = {
+    origin: function (origin, callback) {
+      if (whiteList.indexOf(origin) !== -1 || !origin) {
+        callback(null, true)
+      } else {
+        callback(new Error('Not allowed by CORS'))
+      }
+    },
+    optionsSuccessStatus: 200
+  }
 
-	var corsOptions = {
-		origin: function (origin, callback) {
-			if (whitelist.indexOf(origin) !== -1 || !origin) {
-				callback(null, true)
-			} else {
-				callback(new Error('Not allowed by CORS'))
-			}
-		},
-		optionsSuccessStatus: 200
-	}
-
-	app.use(cors(corsOptions))
-
+  app.use(cors(corsOptions))
 }
 
 app.use(bodyParser.urlencoded({
@@ -77,30 +73,29 @@ app.use(bodyParser.urlencoded({
 }))
 
 app.use(bodyParser.json({
-	limit: '100mb',
+  limit: '100mb'
 }))
 
 mongoose.connect('mongodb://localhost/bumblebee', { useNewUrlParser: true, useUnifiedTopology: true })
 
-const app_secret = process.env.APP_SECRET || '6um61e6ee'
+const appSecret = process.env.APP_SECRET || '6um61e6ee'
 
 app.use(session({
-	secret: app_secret,
-	resave: true,
-	saveUninitialized: false
+  secret: appSecret,
+  resave: true,
+  saveUninitialized: false
 }))
 
-
-let apiRoutes = require("./api-routes")
+const apiRoutes = require('./api-routes')
 
 app.use('/api', apiRoutes)
 
 app.get('/', (req, res) => {
-	if (req.userContext && req.userContext.userinfo) {
-		res.send(`Bumblebee API v${version} - ${req.userContext.userinfo.name}!`)
-	} else {
-		res.send(`Bumblebee API v${version}`)
-	}
+  if (req.userContext && req.userContext.userinfo) {
+    res.send(`Bumblebee API v${version} - ${req.userContext.userinfo.name}!`)
+  } else {
+    res.send(`Bumblebee API v${version}`)
+  }
 })
 
 var sockets = []
@@ -108,21 +103,17 @@ var sockets = []
 var kernels = []
 
 app.post('/dataset', (req, res) => {
+  var socketName = req.body.queue_name || req.body.session || req.body.session
 
-	var socketName = req.body.queue_name || req.body.session || req.body.session
-
-	if (!socketName || !req.body.data) {
-		res.send({status: 'error', message: '"session/username" and "data" fields required'})
-	}
-	else if (!sockets[socketName]){
-		res.send({status: 'error', message: 'Socket with client not found'})
-	}
-	else {
-		var datasetData = req.body.data.toString()
-		sockets[socketName].emit('dataset',datasetData)
-		res.send({message: 'Dataset sent'})
-	}
-
+  if (!socketName || !req.body.data) {
+    res.send({ status: 'error', message: '"session/username" and "data" fields required' })
+  } else if (!sockets[socketName]) {
+    res.send({ status: 'error', message: 'Socket with client not found' })
+  } else {
+    var datasetData = req.body.data.toString()
+    sockets[socketName].emit('dataset', datasetData)
+    res.send({ message: 'Dataset sent' })
+  }
 })
 
 const Server = require('socket.io')
@@ -136,193 +127,180 @@ const createRows = async function (rows, dataset) {
   for (let i = 0; i < rows.length; i++) {
     try {
       var row = new Row()
-			row.value = rows[i%rows.length] || []
+      row.value = rows[i % rows.length] || []
       row.dataset = dataset
       await row.save()
-    }
-    catch (err) {
-      console.error('"""',err,'"""')
+    } catch (err) {
+      console.error('"""', err, '"""')
     }
   }
 }
 
-const new_socket = function (socket, session) {
-	sockets[session] = socket
+const newSocket = function (socket, session) {
+  sockets[session] = socket
 
-	socket.emit('success')
+  socket.emit('success')
 
-	socket.on('initialize', async (payload) => {
-    var user_session = payload.session
+  socket.on('initialize', async (payload) => {
+    var userSession = payload.session
 
     var result
 
     var tries = 10
 
     while (tries--) {
-      result = await createKernel(user_session, payload.engine ? payload.engine : "dask")
-      if (result.status=='error') {
-        console.log('"""',result,'"""')
+      result = await createKernel(userSession, payload.engine ? payload.engine : 'dask')
+      if (result.status === 'error') {
+        console.log('"""', result, '"""')
         console.log('# Kernel error, retrying')
-        await deleteKernel(user_session)
-      }
-      else {
-        console.log('"""',result,'"""')
+        await deleteKernel(userSession)
+      } else {
+        console.log('"""', result, '"""')
         break
       }
     }
 
-		socket.emit('reply',{...result, timestamp: payload.timestamp})
-	})
+    socket.emit('reply', { ...result, timestamp: payload.timestamp })
+  })
 
-	socket.on('run', async (payload) => {
-    var user_session = payload.session
-    var result = await run_code(`${payload.code}`,user_session)
+  socket.on('run', async (payload) => {
+    var userSession = payload.session
+    var result = await runCode(`${payload.code}`, userSession)
     // console.log({result})
-	  socket.emit('reply',{...result, timestamp: payload.timestamp})
-	})
+    socket.emit('reply', { ...result, timestamp: payload.timestamp })
+  })
 
-	socket.on('cells', async (payload) => {
-    var user_session = payload.session
-    var user_key = payload.key
-		var result = await run_code(`${payload.code}`
-    + sl
-    +`df.ext.send(output="json", infer=False, advanced_stats=False${ payload.name ? (', name="'+payload.name+'"') : '' })`,
-    user_session, user_key
+  socket.on('cells', async (payload) => {
+    var userSession = payload.session
+    var userKey = payload.key
+    var result = await runCode(`${payload.code}` +
+    sl +
+    `df.ext.send(output="json", infer=False, advanced_stats=False${payload.name ? (', name="' + payload.name + '"') : ''})`,
+    userSession, userKey
     )
-    socket.emit('reply',{...result, timestamp: payload.timestamp})
-	})
+    socket.emit('reply', { ...result, timestamp: payload.timestamp })
+  })
 
-	return socket
+  return socket
 }
 
 io.on('connection', async (socket) => {
+  const session = socket.handshake.query.session
 
-	const session = socket.handshake.query.session
+  if (!session) {
+    socket.disconnect()
+    return
+  }
 
-	if (!session) {
-		socket.disconnect()
-		return
-	}
+  if (sockets[session] === undefined || !sockets[session].connected || sockets[session].disconnected) {
+    socket = newSocket(socket, session)
+    return
+  }
 
-	if (sockets[session] == undefined || !sockets[session].connected || sockets[session].disconnected) {
-		socket = new_socket(socket,session)
-		return
-	}
-
-	setTimeout(() => {
-		if (sockets[session] == undefined || !sockets[session].connected || sockets[session].disconnected) {
-			new_socket(socket,session)
-			return
-		}
-		socket.emit('new-error','Session already exists. Change your session name.')
-		socket.disconnect()
-	}, 2000)
-
+  setTimeout(() => {
+    if (sockets[session] === undefined || !sockets[session].connected || sockets[session].disconnected) {
+      newSocket(socket, session)
+      return
+    }
+    socket.emit('new-error', 'Session already exists. Change your session name.')
+    socket.disconnect()
+  }, 2000)
 })
 
 const request = require('request-promise')
 
 const uuidv1 = require('uuid/v1')
 
-const run_code = function(code = '', user_session = '', save_rows = false) {
+const runCode = function (code = '', userSession = '', saveRows = false) {
+  return new Promise(async function (resolve, reject) {
+    if (!userSession) { resolve({ error: 'userSession is empty' }) }
 
-	return new Promise( async function(resolve,reject) {
+    try {
+      const versionResponse = await request({
+        uri: `${base}/api`,
+        method: 'GET',
+        headers: {}
+      })
 
-		if (!user_session)
-			resolve({error: 'user_session is empty'})
+      const version = JSON.parse(versionResponse).version
 
-		try {
-			const version_response = await request({
-				uri: `${base}/api`,
-				method: 'GET',
-				headers: {},
-			})
+      if (kernels[userSession] === undefined) {
+        console.log('# Jupyter Kernel Gateway Version', version)
 
-			const version = JSON.parse(version_response).version
+        const uuid = Buffer.from(uuidv1(), 'utf8').toString('hex')
 
-			if (kernels[user_session]==undefined) {
+        const response = await request({
+          uri: `${base}/api/kernels`,
+          method: 'POST',
+          headers: {}
+        })
 
-				console.log('# Jupyter Kernel Gateway Version',version)
+        kernels[userSession] = { kernel: JSON.parse(response), uuid }
 
-				let uuid = Buffer.from( uuidv1(), 'utf8' ).toString('hex')
+        console.log('# Kernel ID for', userSession, 'is', kernels[userSession].kernel.id)
+      }
 
-				const response = await request({
-					uri: `${base}/api/kernels`,
-					method: 'POST',
-					headers: {},
-				})
+      var content = { code: code + '\n', silent: false }
 
-				kernels[user_session] = { kernel: JSON.parse(response), uuid }
+      var hdr = {
+        msg_id: kernels[userSession].uuid,
+        session: kernels[userSession].uuid,
+        date: new Date().toISOString(),
+        msg_type: 'execute_request',
+        version: versionResponse.version
+      }
 
-				console.log('# Kernel ID for',user_session,'is',kernels[user_session].kernel['id'])
-			}
+      var codeMsg = {
+        header: hdr,
+        parent_header: hdr,
+        metadata: {},
+        content: content
+      }
 
-			var content = { code: code+'\n', silent: false }
+      const WebSocketClient = require('websocket').client
 
-			var hdr = {
-				'msg_id' : kernels[user_session].uuid,
-				'session': kernels[user_session].uuid,
-				'date': new Date().toISOString(),
-				'msg_type': 'execute_request',
-				'version' : version_response.version
-			}
+      var client = new WebSocketClient({ closeTimeout: 20 * 60 * 1000 })
 
-			var codeMsg = {
-				'header': hdr,
-				'parent_header': hdr,
-				'metadata': {},
-				'content': content
-			}
+      client.on('connectFailed', async function (error) {
+        console.warn('Connection to Jupyter Kernel Gateway failed')
+        resolve({ status: 'error', content: error, error: 'Connection to Jupyter Kernel Gateway failed' })
+      })
 
-			const WebSocketClient = require('websocket').client
+      client.on('connect', function (connection) {
+        connection.on('message', async function (message) {
+          var parsedMessage = JSON.parse(message.utf8Data)
 
-			var client = new WebSocketClient({closeTimeout: 20 * 60 * 1000})
+          // if (parsedMessage.content.code)
+          //   console.log({ code: parsedMessage.content.code })
 
-			client.on('connectFailed', async function(error) {
-				console.warn('Connection to Jupyter Kernel Gateway failed')
-				resolve({status: 'error', content: error, error: 'Connection to Jupyter Kernel Gateway failed'})
-			})
-
-			client.on('connect',function(connection){
-
-				connection.on('message', async function(message) {
-
-          var parsed_message = JSON.parse(message.utf8Data)
-
-
-          // if (parsed_message.content.code)
-          //   console.log({ code: parsed_message.content.code })
-
-					if (message.type !== 'utf8'){
+          if (message.type !== 'utf8') {
             connection.close()
-						// console.error("Message type error", parsed_message.content)
-						resolve({status: 'error', content: 'Response from gateway is not utf8 type', error: 'Message type error'})
-          }
-          else if (parsed_message.msg_type === 'error') {
+            // console.error("Message type error", parsedMessage.content)
+            resolve({ status: 'error', content: 'Response from gateway is not utf8 type', error: 'Message type error' })
+          } else if (parsedMessage.msg_type === 'error') {
             connection.close()
-            // console.error("Error", parsed_message.content)
-            resolve({status: 'error', content: parsed_message.content, error: 'Error'})
-          }
-          else if (parsed_message.msg_type === 'execute_result'){
-            const response = parsed_message.content.data['text/plain']
+            // console.error("Error", parsedMessage.content)
+            resolve({ status: 'error', content: parsedMessage.content, error: 'Error' })
+          } else if (parsedMessage.msg_type === 'execute_result') {
+            const response = parsedMessage.content.data['text/plain']
 
-            if (save_rows) {
+            if (saveRows) {
               try {
-                const parsed_response = JSON.parse(trimCharacters(response,"'"))
+                const parsedResponse = JSON.parse(trimCharacters(response, "'"))
 
-                const current_session = await findOneOrCreate(Session, {user_session}, {user_session, queue_name: parsed_response.queue_name})
+                const currentSession = await findOneOrCreate(Session, { userSession }, { userSession, queue_name: parsedResponse.queue_name })
 
-                let data = pakoFernet(save_rows, parsed_response.data)
+                const data = pakoFernet(saveRows, parsedResponse.data)
 
-                const dataset = await findOneOrCreate( Dataset, { meta: data, session: current_session._id } )
+                const dataset = await findOneOrCreate(Dataset, { meta: data, session: currentSession._id })
 
-                // current_session TODO: add dataset to current_session.datasets Array and save
+                // currentSession TODO: add dataset to currentSession.datasets Array and save
 
-                await Row.deleteMany({dataset})
+                await Row.deleteMany({ dataset })
 
-                let rows = [...data.sample.value]
+                const rows = [...data.sample.value]
 
-                if (data.sample.value && data.sample.value[0] && data.sample.value.length*data.sample.value[0].length > 700) {
+                if (data.sample.value && data.sample.value[0] && data.sample.value.length * data.sample.value[0].length > 700) {
                   delete data.sample
                 }
 
@@ -335,88 +313,75 @@ const run_code = function(code = '', user_session = '', save_rows = false) {
                 data.id = (dataset && dataset._id) ? dataset._id : '0'
 
                 resolve({ status: 'ok', content: data })
-
               } catch (error) {
-                console.error('"""',error,'"""')
+                console.error('"""', error, '"""')
                 resolve({ status: 'error', content: error })
               }
-            }
-            else {
+            } else {
               resolve({ status: 'ok', content: response })
             }
 
             connection.close()
           }
           // else {
-            // console.warn('# Received message with unhandled msg_type')
-            // console.log({msg_type: parsed_message.msg_type})
-            // resolve({ status: 'error', content: parsed_message })
+          // console.warn('# Received message with unhandled msg_type')
+          // console.log({msg_type: parsedMessage.msg_type})
+          // resolve({ status: 'error', content: parsedMessage })
           // }
-
-				})
-
-				connection.on('error', async function(error) {
-					console.error('"""Connection Error', error,'"""')
-					connection.close()
-					resolve({status: 'error', content: error, error: 'Connection error'})
-				})
-
-				connection.on('close', function(reason) {
-					// console.log('Connection closed before response, reason: ' + reason)
-					resolve({status: 'error', retry: true, error: 'Connection to Jupyter Kernel Gateway closed before response', content: reason})
         })
 
-        if (process.env.NODE_ENV != 'production')
-          console.log(code)
+        connection.on('error', async function (error) {
+          console.error('"""Connection Error', error, '"""')
+          connection.close()
+          resolve({ status: 'error', content: error, error: 'Connection error' })
+        })
 
-				connection.sendUTF(JSON.stringify(codeMsg))
+        connection.on('close', function (reason) {
+          // console.log('Connection closed before response, reason: ' + reason)
+          resolve({ status: 'error', retry: true, error: 'Connection to Jupyter Kernel Gateway closed before response', content: reason })
+        })
 
-			})
+        if (process.env.NODE_ENV != 'production') { console.log(code) }
 
-			client.on('disconnect',async function(reason) {
-				// console.log('Client disconnected')
-				resolve({status: 'disconnected', retry: true, error: 'Client disconnected', content: reason})
-			})
+        connection.sendUTF(JSON.stringify(codeMsg))
+      })
 
-			// console.log('Connecting client')
-			client.connect(`${ws_kernel_base}/api/kernels/${kernels[user_session].kernel['id']}/channels`)
+      client.on('disconnect', async function (reason) {
+        // console.log('Client disconnected')
+        resolve({ status: 'disconnected', retry: true, error: 'Client disconnected', content: reason })
+      })
 
-
-		} catch (error) {
-      if (error.error)
-        resolve({status: 'error',...error, content: error.message})
-      else
-			  resolve({status: 'error', error: 'Internal error', content: error})
-		}
+      // console.log('Connecting client')
+      client.connect(`${wsKernelBase}/api/kernels/${kernels[userSession].kernel.id}/channels`)
+    } catch (error) {
+      if (error.error) { resolve({ status: 'error', ...error, content: error.message }) } else { resolve({ status: 'error', error: 'Internal error', content: error }) }
+    }
   })
-
 }
 
-const deleteKernel = async function(session) {
-	try {
-		if (kernels[session] != undefined) {
-      var _id = kernels[session].kernel['id']
-			kernels[session] = undefined
+const deleteKernel = async function (session) {
+  try {
+    if (kernels[session] != undefined) {
+      var _id = kernels[session].kernel.id
+      kernels[session] = undefined
       await request({
         uri: `${base}/api/kernels/${_id}`,
         method: 'DELETE',
-        headers: {},
+        headers: {}
       })
-      console.log('# Deleting Jupyter Kernel Gateway session for',session,_id)
-		}
-	} catch (err) {}
+      console.log('# Deleting Jupyter Kernel Gateway session for', session, _id)
+    }
+  } catch (err) {}
 }
 
-const createKernel = async function (user_session, engine) {
-
-	if (kernels[user_session]==undefined){
-		return await run_code(`
+const createKernel = async function (userSession, engine) {
+  if (kernels[userSession] == undefined) {
+    return await runCode(`
 from optimus import Optimus
 op = Optimus("${engine}", n_workers=4, threads_per_worker=2, processes=False, memory_limit="3G", comm=True)
-'kernel init optimus init ' + op.__version__ + '  ' + op.engine`,user_session)
-	}
-	else {
-		return await run_code(`
+'kernel init optimus init ' + op.__version__ + '  ' + op.engine`, userSession)
+  } else {
+    return await runCode(`
 _status = 'kernel ok '
 
 try:
@@ -432,42 +397,38 @@ except NameError:
 	op = Optimus("${engine}", n_workers=4, threads_per_worker=2, processes=False, memory_limit="3G", comm=True)
 	_status = 'optimus init ' + op.__version__ + ' ${engine} '
 
-_status`,user_session)
-	}
+_status`, userSession)
+  }
 }
 
 const startServer = async () => {
-	const port = process.env.PORT || 5000
-	const host = process.env.HOST || '0.0.0.0'
-	var _server = server.listen(port, host, async () => {
+  const port = process.env.PORT || 5000
+  const host = process.env.HOST || '0.0.0.0'
+  var _server = server.listen(port, host, async () => {
     console.log(`# Bumblebee-api v${version} listening on ${host}:${port}`)
 
     try {
-
       const response = await request({
         uri: `${base}/api/kernels`,
         method: 'GET',
-        headers: {},
+        headers: {}
       })
 
       const kernels = JSON.parse(response)
 
-      if (process.env.NODE_ENV == 'production') {
+      if (process.env.NODE_ENV === 'production') {
         kernels.forEach(async kernel => {
           console.log(`# Deleting kernel ${kernel.id}`)
           await request({
             uri: `${base}/api/kernels/${kernel.id}`,
             method: 'DELETE',
-            headers: {},
+            headers: {}
           })
         })
       }
-
     } catch (error) {}
-
-	})
+  })
   _server.timeout = 10 * 60 * 1000
-
 }
 
 startServer()
